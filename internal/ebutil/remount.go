@@ -63,8 +63,8 @@ func tempRemount(m mounter, logf func(notcodersdk.LogLevel, string, ...any), bas
 outer:
 	for _, mountInfo := range mountInfos {
 		// TODO: do this for all mounts
-		if _, ok := mountInfo.Options["ro"]; !ok {
-			logf(notcodersdk.LogLevelTrace, "skip rw mount %s", mountInfo.MountPoint)
+		if _, isRO := mountInfo.Options["ro"]; !isRO && mountInfo.FSType != "devtmpfs" {
+			logf(notcodersdk.LogLevelTrace, "skip mount %s", mountInfo.MountPoint)
 			continue
 		}
 

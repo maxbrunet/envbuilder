@@ -43,6 +43,54 @@ func Test_tempRemount(t *testing.T) {
 		_ = remount()
 	})
 
+	t.Run("OKDevtmpfs", func(t *testing.T) {
+		t.Parallel()
+
+		ctrl := gomock.NewController(t)
+		mm := NewMockmounter(ctrl)
+		mounts := fakeMounts("/home", "/run/nvidia-container-devices/GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1", "/proc", "/sys")
+
+		mm.EXPECT().GetMounts().Return(mounts, nil)
+		mm.EXPECT().Stat("/etc/debian_version").Return(nil, os.ErrNotExist)
+		mm.EXPECT().ReadDir("/usr/lib64").Return(nil, os.ErrNotExist)
+		mm.EXPECT().
+			Stat("/run/nvidia-container-devices/GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1").
+			Return(&fakeFileInfo{name: "GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1"}, nil)
+		mm.EXPECT().MkdirAll("/.test/run/nvidia-container-devices", os.FileMode(0o750)).Times(1).Return(nil)
+		mm.EXPECT().OpenFile(
+			"/.test/run/nvidia-container-devices/GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1",
+			os.O_CREATE, os.FileMode(0o640),
+		).Times(1).Return(new(os.File), nil)
+		mm.EXPECT().Mount(
+			"/run/nvidia-container-devices/GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1",
+			"/.test/run/nvidia-container-devices/GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1",
+			"bind", uintptr(syscall.MS_BIND), "",
+		).Times(1).Return(nil)
+		mm.EXPECT().Unmount("/run/nvidia-container-devices/GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1", 0).Times(1).Return(nil)
+		mm.EXPECT().Stat("/etc/debian_version").Return(nil, os.ErrNotExist)
+		mm.EXPECT().
+			Stat("/.test/run/nvidia-container-devices/GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1").
+			Return(&fakeFileInfo{name: "GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1"}, nil)
+		mm.EXPECT().MkdirAll("/run/nvidia-container-devices", os.FileMode(0o750)).Times(1).Return(nil)
+		mm.EXPECT().OpenFile(
+			"/run/nvidia-container-devices/GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1",
+			os.O_CREATE, os.FileMode(0o640),
+		).Times(1).Return(new(os.File), nil)
+		mm.EXPECT().Mount(
+			"/.test/run/nvidia-container-devices/GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1",
+			"/run/nvidia-container-devices/GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1",
+			"bind", uintptr(syscall.MS_BIND), "",
+		).Times(1).Return(nil)
+		mm.EXPECT().Unmount("/.test/run/nvidia-container-devices/GPU-ecc4c7ce-1907-40f0-b60c-99ae633ad7c1", 0).Times(1).Return(nil)
+
+		remount, err := tempRemount(mm, fakeLog(t), "/.test")
+		require.NoError(t, err)
+		err = remount()
+		require.NoError(t, err)
+		// sync.Once should handle multiple remount calls
+		_ = remount()
+	})
+
 	t.Run("OKFile", func(t *testing.T) {
 		t.Parallel()
 
@@ -222,13 +270,19 @@ func Test_tempRemount(t *testing.T) {
 func fakeMounts(mounts ...string) []*procfs.MountInfo {
 	m := make([]*procfs.MountInfo, 0)
 	for _, s := range mounts {
+		fst := "tmpfs"
+		// Based on https://github.com/NVIDIA/nvidia-container-toolkit/blob/v1.15.0/cmd/nvidia-container-runtime-hook/container_config.go#L35
+		// Note: /var/run is often a symlink to /run
+		if strings.HasPrefix(s, "/var/run/nvidia-container-devices") || strings.HasPrefix(s, "/run/nvidia-container-devices") {
+			fst = "devtmpfs"
+		}
 		mp := s
 		o := make(map[string]string)
 		if strings.HasSuffix(mp, ":ro") {
 			mp = strings.TrimSuffix(mp, ":ro")
 			o["ro"] = "true"
 		}
-		m = append(m, &procfs.MountInfo{MountPoint: mp, Options: o})
+		m = append(m, &procfs.MountInfo{FSType: fst, MountPoint: mp, Options: o})
 	}
 	return m
 }
